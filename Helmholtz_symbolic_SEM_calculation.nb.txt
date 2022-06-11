@@ -1,0 +1,278 @@
+(* ============================================================================ \
+*)
+(* Symbolical calculation of Helmholtz equation and comparison with \
+analytical calculation *)
+(* Purpose: Demonstrate, that an error in numerical calculation is a \
+result of matrix      *)
+(* condition and not depending on node distribution                   \
+                     *)
+(* Warning: High numbers for m (>3) and nelements (>3) lead to absurd \
+calculation times!  *)
+(* ============================================================================\
+ *)
+
+nsub = 10;(* Number of data points for error vs analytical solution *)
+\
+
+domainlength = 3; (* Length of domain *)
+freq = 100; (* Frequency *)
+c = 340; (* Speed of sound *)
+(* nodemethod: Node distribution for lagrange shape functions \
+"equdist" for uniform node distribution, "lobatto" distribution, \
+"chebyshev" distribution, "random" node distribution or "6ix9ine" \
+...also random node distribution *)
+m = 3; (* Order of shape functions *)
+nelements = 3; (* Number of elements *)
+domain = "m1p1"; (* "m1p1" for [-1,+1], "0p1" for [0,+1] *)
+
+(* nodemethod: Node distribution for lagrange shape functions \
+"equdist" for uniform node distribution, "lobatto" distribution, \
+"chebyshev" distribution, "random" node distribution or "6ix9ine" \
+...also random node distribution *)
+calcsol[nodemethod_] := Module[{},
+  \[Omega] = 2 Pi*freq;
+  kw = \[Omega]/c;
+  elementlength = domainlength/nelements;
+  Clear[xisym, xi, phisyml, elesteifmath, elesteifmat, elemassmat, 
+   elemassmath];
+  
+  (* ========================================================================== \
+*)
+  (* Symbolical solution *)
+  at1 = AbsoluteTiming[
+    Module[{f, phisymqx, phisymqy, k, i, j, mlobattom, sol, solsort, 
+       randomnumbers, nrh, elesteifmath, elemassmath},
+      Which[
+       nodemethod == "equdist",
+       (* Nodes evenly spaced *)
+       Table[xisym[i] = Subdivide[-1, 1, m][[i]], {i, 1, m + 1}];,
+       
+       nodemethod == "lobatto",
+       LobattoP[n_, x_] := D[LegendreP[n + 1, x], x];
+       mlobatto = m - 1;
+       sol = Solve[LobattoP[mlobatto, x] == 0, x];
+       sol = {-1}~Join~sol[[;; , 1, 2]]~Join~{1};
+       solsort = Re@SortBy[sol, N];
+       Table[xisym[i] = solsort[[i]], {i, 1, m + 1}];,
+       
+       nodemethod == "chebyshev",
+       Table[xisym[i] = -Cos[(i - 1) Pi/m], {i, 1, m + 1}];,
+       
+       nodemethod == "random",
+       Which[
+         m == 1,
+         xisym[1] = 0; xisym[2] = 1;,
+         m > 1,
+         randomnumbers = {};
+         While[Length[randomnumbers] < (m - 1),
+          nrh = RandomInteger[{-999, 999}]/1000;
+          
+          If[MemberQ[randomnumbers, nrh] == False, 
+           AppendTo[randomnumbers, nrh], Null];
+          ];
+         solsort = Sort[{-1}~Join~randomnumbers~Join~{1}];
+         Table[xisym[i] = solsort[[i]], {i, 1, m + 1}];
+         ];,
+       nodemethod == "6ix9ine",
+       Which[
+         m == 1,
+         xisym[1] = 0; xisym[2] = 1;,
+         m > 1,
+         randomnumbers = {};
+         While[Length[randomnumbers] < (m - 1),
+          nrh = RandomInteger[{-68, 68}]/69;
+          
+          If[MemberQ[randomnumbers, nrh] == False, 
+           AppendTo[randomnumbers, nrh], Null];
+          ];
+         solsort = Sort[{-1}~Join~randomnumbers~Join~{1}];
+         Table[xisym[i] = solsort[[i]], {i, 1, m + 1}];
+         ];
+       ];
+      
+      (* Transformation [0,1] <> [-1,1] *)
+      Which[
+       domain == "m1p1",
+       Null,
+       domain == "0p1",
+       Table[xisym[i] = (1 + xisym[i])/2, {i, 1, m + 1}];
+       ];
+      
+      at3 = AbsoluteTiming[
+        (* Symbolical calculation of shape functions *)
+        For[j = 1, j <= m + 1, j++,
+          For[i = 1, i <= m + 1, i++,
+           
+           If[i != j, f[i] = (xi - xisym[i])/(xisym[j] - xisym[i]), 
+             f[i] = 1];
+           ];
+          phisyml[j] = Product[f[i], {i, 1, m + 1}];
+          ];
+        ];
+      (* symbolical calculation of shape functions for jacobian *)
+      Which[
+       domain == "m1p1",
+       phisymllin[1] = (1 - xi)/2;
+       phisymllin[2] = (1 + xi)/2;,
+       domain == "0p1",
+       phisymllin[1] = 1 - xi;
+       phisymllin[2] = xi;
+       ];
+      at4 = AbsoluteTiming[
+        (* symbolical calculation of element matrices *)
+        xh = Sum[{x1, x2}[[i]]*phisymllin [i], {i, 1, 2}];
+        jacobimat4element = {{D[xh, xi]}};
+        detj = Det[jacobimat4element];
+        invtj = (Inverse@Transpose[jacobimat4element])[[1, 1]];
+        
+        elesteifmath = 
+         Table[Integrate[(invtj)*D[phisyml[i], xi]*
+            D[phisyml[j], xi], {xi, xisym[1], 1}], {i, 1, m + 1}, {j, 
+           1, m + 1}];
+        elemassmath = 
+         Table[Integrate[
+           detj*phisyml[i]*phisyml[j], {xi, xisym[1], 1}], {i, 1, 
+           m + 1}, {j, 1, m + 1}];
+        elesteifmat[xl_, xr_] := elesteifmath /. {x1 -> xl, x2 -> xr};
+        elemassmat[xl_, xr_] := elemassmath /. {x1 -> xl, x2 -> xr};
+        elesteifmatoutput = elesteifmath;
+        elemassmathoutput = elemassmath;
+        ];
+      ];
+    ];
+  Print["Calculation time nodes:", at1[[1]], 
+   "\nCalculation time shape functions:", at3[[1]], 
+   "\nCalculation time elements:", at4[[1]]];
+  
+  (* calculation of nodedistribution *)
+  nodes = Range[1, nelements*m + 1];
+  zuordtab = Partition[nodes, m + 1, m];
+  maxnode = Length[nodes];
+  nodepositions = Range[0, domainlength, elementlength/m];
+  allnodes = 
+   Table[{nodepositions[[i]], nodes[[i]]}, {i, 1, Length[nodes]}];
+  
+  at2 = AbsoluteTiming[
+    (* Element matrices *)
+    For[i = 1, i <= nelements, i++,
+      kl = allnodes[[zuordtab[[i, 1]], 1]];
+      kr = allnodes[[zuordtab[[i, m + 1]], 1]];
+      elementsteifmat[i] = elesteifmat[kl, kr];
+      elementmassmat[i] = elemassmat[kl, kr];
+      ];
+    ];
+  
+  (* Assembly of system matrix *)
+  sysmatrixggsteif = Table[0, maxnode, maxnode];
+  sysmatrixggmass = Table[0, maxnode, maxnode];
+  lastvektor = Table[0, maxnode];
+  For[ielem = 1, ielem <= nelements, ielem++,
+   Table[sysmatrixggsteif[[zuordtab[[ielem, a]], 
+       zuordtab[[ielem, b]]]] = 
+      sysmatrixggsteif[[zuordtab[[ielem, a]], zuordtab[[ielem, b]]]] +
+        elementsteifmat[ielem][[a, b]];, {a, 1, (m + 1)}, {b, 
+     1, (m + 1)}];
+   Table[sysmatrixggmass[[zuordtab[[ielem, a]], 
+       zuordtab[[ielem, b]]]] = 
+      sysmatrixggmass[[zuordtab[[ielem, a]], zuordtab[[ielem, b]]]] + 
+       elementmassmat[ielem][[a, b]];, {a, 1, (m + 1)}, {b, 
+     1, (m + 1)}];
+   ];
+  
+  sysmatfreq = sysmatrixggsteif - kw^2*sysmatrixggmass;
+  
+  (* boundary conditions *)
+  boundarylv = {{1, 1}, {maxnode, 0}};
+  (* reduce systemmatrix *)
+  lenboundarylv = Length[boundarylv];
+  sysmatfreqred = sysmatfreq;
+  atreduce = AbsoluteTiming[
+    replistfreq = 
+     Table[{boundarylv[[i, 1]], boundarylv[[i, 1]]}, {i, 
+       lenboundarylv}];
+    sysmatfreqred[[boundarylv[[;; , 1]], ;;]] = 0;
+    sysmatfreqred[[;; , boundarylv[[;; , 1]]]] = 0;
+    sysmatfreqred += 
+     SparseArray[
+      replistfreq -> Subtract[1, Extract[sysmatfreqred, replistfreq]],
+       Dimensions[sysmatfreqred]];
+    ];
+  (* load vector *)
+  lastvektor = 
+   lastvektor - 
+    sysmatfreq[[;; , boundarylv[[;; , 1]]]].boundarylv[[;; , 2]];
+  Table[lastvektor[[boundarylv[[;; , 1]]]] = boundarylv[[;; , 2]], {i,
+     1, Length@boundarylv}];
+  
+  (* solution *)
+  solution = LinearSolve[sysmatfreqred, lastvektor];
+  solutionallnodes = 
+   Table[{allnodes[[i, 1]], solution[[i]]}, {i, 1, maxnode}];
+  
+  (* solution back to shape functions *)
+  Module[{x1, x2, elemnodesol},
+   Which[
+     domain == "m1p1",
+     For[ielem = 1, ielem <= nelements, ielem++,
+       elemnodessol[ielem] = solution[[zuordtab[[ielem]]]];
+       x1 = allnodes[[zuordtab[[ielem]] // First, 1]];
+       x2 = allnodes[[zuordtab[[ielem]] // Last, 1]];
+       elemsol[ielem] = 
+        Sum[phisyml[j]*elemnodessol[ielem][[j]], {j, 1, m + 1}];
+       elemsolreal[ielem] = 
+        Piecewise[{{Sum[
+             phisyml[j]*elemnodessol[ielem][[j]], {j, 1, m + 1}] /. 
+            xi -> (x1 + x2 - 2 x)/(x1 - x2), x1 <= x < x2}, {0, 
+           x >= x2}, {0, x < x1}}];
+       ];
+     ,
+     domain == "0p1",
+     For[ielem = 1, ielem <= nelements, ielem++,
+       elemnodessol[ielem] = solution[[zuordtab[[ielem]]]];
+       x1 = allnodes[[zuordtab[[ielem]] // First, 1]];
+       x2 = allnodes[[zuordtab[[ielem]] // Last, 1]];
+       elemsol[ielem] = 
+        Sum[phisyml[j]*elemnodessol[ielem][[j]], {j, 1, m + 1}];
+       elemsolreal[ielem] = 
+        Piecewise[{{Sum[
+             phisyml[j]*elemnodessol[ielem][[j]], {j, 1, m + 1}] /. 
+            xi -> (x1 - x)/(x1 - x2), x1 <= x < x2}, {0, x >= x2}, {0,
+            x < x1}}];
+       ];
+     ];
+   ];
+  (* ========================================================================== \
+*)
+  
+  (* ========================================================================== \
+*)
+  (* Analytical solution *)
+  solndsolve = 
+   DSolve[{u''[x] + kw^2*u[x] == 0, u[0] == 1, 
+      u[domainlength] == 0}, {u[x]}, x][[1, 1, 2]];
+  (* ========================================================================== \
+*)
+  solutionexactnumerical = 
+   Table[elemsolreal[ielem], {ielem, 1, nelements}];
+  sollexamp = 
+   Table[Select[
+      solutionexactnumerical /. x -> xt, # != 0 &][[1]], {xt, 
+     1/7*domainlength, 6/7*domainlength, domainlength/7}];
+  Return[sollexamp];
+  ];
+
+solutioneq = calcsol["equdist"];
+solutionlob = calcsol["lobatto"];
+solutionran = calcsol["random"];
+
+Plot[{solutionexactnumerical, solndsolve}, {x, 0, domainlength}, 
+ PlotRange -> All, 
+ PlotLegends -> {"FEM calculation, symbolical evaluation", 
+   "Analytical solution of Differential equation"}]
+
+acc = 32;
+Print["Solution for x=", 
+  Table[xt, {xt, 1/7*domainlength, 6/7*domainlength, domainlength/7}]];
+Print["uniform node distribution:", N[solutioneq, acc]]
+Print["lobatto node distribution:", N[solutionlob, acc]]
+Print["random node distribution:", N[solutionran, acc]]
